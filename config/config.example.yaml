@@ -1,0 +1,50 @@
+# Copy this file to config/config.yaml and adjust for your deployment.
+# Secrets (mailbox credentials, admin email, authorised domains) go in .env, not here.
+
+mail:
+  provider: graph               # graph | imap | fake
+  mailbox_upn: diarisation@yourtenant.onmicrosoft.com
+  poll_interval_seconds: 30
+  move_to_folder: null          # e.g. "Processed" - optional, mail is never deleted
+  max_body_chars_to_llm: 4000
+
+authorisation:
+  require_auth_pass: true       # fail closed if SPF/DKIM/DMARC don't pass
+  group_owners:
+    # authorised sender email -> backend user_id (see group_meeting_transcripts /users/)
+    alice@university.ac.uk: 12
+    bob@university.ac.uk: 7
+
+llm:
+  provider: ollama
+  host: http://localhost:11434
+  model: qwen2.5:14b
+  request_timeout_seconds: 60
+  max_parse_retries: 2
+
+backend:
+  base_url: http://localhost:8000
+  request_timeout_seconds: 10
+  max_retry_attempts: 3
+  retry_backoff_seconds: 1.0
+
+limits:
+  max_attachment_size_mb: 20
+  allowed_attachment_extensions: [".vtt"]
+  max_email_body_chars: 20000
+
+storage:
+  incoming: ./data/incoming
+  processing: ./data/processing
+  completed: ./data/completed
+  failed: ./data/failed
+  db_path: ./data/app.db
+  default_timezone: UTC
+
+admin:
+  alert_cooldown_minutes: 15
+
+logging:
+  level: INFO
+  log_email_bodies: false
+  log_dir: ./data/logs

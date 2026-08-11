@@ -1,0 +1,89 @@
+"""Shared in-memory test doubles."""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional
+
+
+class StubLLM:
+    """Duck-type stand-in for OllamaClient: returns the same canned JSON response on every
+    call (or a sequence of responses, consumed in order). `available` controls is_available()
+    so tests can simulate Ollama being down."""
+
+    def __init__(self, response, available: bool = True):
+        self._responses = response if isinstance(response, list) else [response]
+        self.available = available
+        self.calls = 0
+
+    def is_available(self) -> bool:
+        return self.available
+
+    def generate(self, system_prompt: str, user_prompt: str, temperature: float = 0.0) -> str:
+        response = self._responses[min(self.calls, len(self._responses) - 1)]
+        self.calls += 1
+        return response
+
+from app.diarisation.client import (
+    AttendeeSummary,
+    GroupSummary,
+    MeetingSummary,
+    RawFileSummary,
+    TransientError,
+)
+
+
+class FakeDiarisationClient:
+    """Duck-type stand-in for DiarisationClient - no HTTP involved. Configure `fail_on` with a
+    method name to make that call raise TransientError, simulating a backend outage."""
+
+    def __init__(
+        self,
+        groups: list[GroupSummary],
+        member_by_name: Optional[dict[str, Optional[int]]] = None,
+        fail_on: Optional[str] = None,
+    ):
+        self.groups = groups
+        self.member_by_name = member_by_name or {}
+        self.fail_on = fail_on
+        self.meetings: list[MeetingSummary] = []
+        self.uploads: list[RawFileSummary] = []
+        self.attendees_added: list[int] = []
+
+    def _maybe_fail(self, name: str) -> None:
+        if self.fail_on == name:
+            raise TransientError(f"simulated failure in {name}")
+
+    def login(self, user_id: int) -> str:
+        self._maybe_fail("login")
+        return f"token-for-{user_id}"
+
+    def list_groups(self, token: str) -> list[GroupSummary]:
+        self._maybe_fail("list_groups")
+        return self.groups
+
+    def create_meeting(self, token: str, group_id: int, date: datetime) -> MeetingSummary:
+        self._maybe_fail("create_meeting")
+        meeting = MeetingSummary(id=len(self.meetings) + 1, group_id=group_id, date=date.isoformat())
+        self.meetings.append(meeting)
+        return meeting
+
+    def upload_file(
+        self, token: str, group_id: int, meeting_id: int, filename: str, content: bytes
+    ) -> RawFileSummary:
+        self._maybe_fail("upload_file")
+        raw_file = RawFileSummary(
+            id=len(self.uploads) + 1, file_name=filename, human_name=filename, type="transcript_provided"
+        )
+        self.uploads.append(raw_file)
+        return raw_file
+
+    def add_attendee(self, token: str, group_id: int, meeting_id: int, member_id: int) -> AttendeeSummary:
+        self._maybe_fail("add_attendee")
+        self.attendees_added.append(member_id)
+        return AttendeeSummary(id=member_id, name=f"member-{member_id}")
+
+    def resolve_aliases(
+        self, token: str, group_id: int, names: list[str], source: Optional[str] = None
+    ) -> dict[str, Optional[int]]:
+        self._maybe_fail("resolve_aliases")
+        return {name: self.member_by_name.get(name) for name in names}
