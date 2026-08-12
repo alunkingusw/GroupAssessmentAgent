@@ -55,7 +55,7 @@ class AdminNotifier:
 
         self._outbox.enqueue(
             to_email=self._admin_email,
-            subject=f"[DiariseAgent] {category.value.replace('_', ' ').title()}",
+            subject=f"[GroupAssessmentAgent] {category.value.replace('_', ' ').title()}",
             body_text="\n".join(body_lines),
         )
         self._record_sent(category)

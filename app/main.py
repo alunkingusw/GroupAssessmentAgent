@@ -122,7 +122,7 @@ def run(settings: Settings) -> None:
     )
     mail_thread = threading.Thread(target=_mail_loop, name="mail-pipeline", daemon=True)
 
-    logger.info("DiariseAgent starting (mail.provider=%s, llm.model=%s)", settings.mail.provider, settings.llm.model)
+    logger.info("GroupAssessmentAgent starting (mail.provider=%s, llm.model=%s)", settings.mail.provider, settings.llm.model)
     worker_thread.start()
     mail_thread.start()
 
@@ -136,7 +136,7 @@ def run(settings: Settings) -> None:
         mail_thread.join(timeout=5.0)
         ollama_client.close()
         diarisation_client.close()
-        logger.info("DiariseAgent stopped.")
+        logger.info("GroupAssessmentAgent stopped.")
 
 
 def main() -> None:

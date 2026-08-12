@@ -120,7 +120,7 @@ Edit `.env`:
 6. **Recommended**: scope the app's mail access to only this mailbox, rather than leaving it
    with tenant-wide access, using Exchange Online PowerShell:
    ```powershell
-   New-ApplicationAccessPolicy -AppId <client-id> -PolicyScopeGroupId diarisation@yourtenant.onmicrosoft.com -AccessRight RestrictAccess -Description "DiariseAgent - restrict to one mailbox"
+   New-ApplicationAccessPolicy -AppId <client-id> -PolicyScopeGroupId diarisation@yourtenant.onmicrosoft.com -AccessRight RestrictAccess -Description "GroupAssessmentAgent - restrict to one mailbox"
    ```
 
 ### 6. Run

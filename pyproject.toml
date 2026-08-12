@@ -1,5 +1,5 @@
 [project]
-name = "diarise-agent"
+name = "group-assessment-agent"
 version = "0.1.0"
 description = "Email-based interface for the local speaker diarisation / group meeting transcription system"
 requires-python = ">=3.11"
