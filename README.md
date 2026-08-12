@@ -1,4 +1,4 @@
-# DiariseAgent — Email Interface
+# GroupAssessmentAgent — Email Interface
 
 An email-based interface for the [group_meeting_transcripts](../group_meeting_transcripts)
 group-meeting transcription platform. Authorised group owners email an already-produced `.vtt`
