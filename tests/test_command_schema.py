@@ -74,3 +74,28 @@ def test_clarification_with_question_is_valid():
 def test_blank_strings_normalise_to_none():
     cmd = ParsedCommand(operation=Operation.HELP, group_hint="   ")
     assert cmd.group_hint is None
+
+
+def test_assess_query_minimal_valid_with_one_source():
+    cmd = ParsedCommand(operation=Operation.ASSESS_QUERY, github_focus="open issues")
+    assert cmd.github_focus == "open issues"
+    assert cmd.transcript_focus is None
+    assert cmd.trello_focus is None
+
+
+def test_assess_query_accepts_all_three_focus_fields():
+    cmd = ParsedCommand(
+        operation=Operation.ASSESS_QUERY,
+        transcript_focus="mentions of the API redesign",
+        github_focus="open issues about the API",
+        trello_focus="cards tagged API",
+    )
+    assert cmd.transcript_focus == "mentions of the API redesign"
+    assert cmd.github_focus == "open issues about the API"
+    assert cmd.trello_focus == "cards tagged API"
+
+
+def test_assess_query_blank_focus_fields_normalise_to_none():
+    cmd = ParsedCommand(operation=Operation.ASSESS_QUERY, github_focus="   ", trello_focus="x")
+    assert cmd.github_focus is None
+    assert cmd.trello_focus == "x"

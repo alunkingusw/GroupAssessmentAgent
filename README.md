@@ -35,10 +35,15 @@ adjusted as follows:
   LLM parse failures, backend submission failures, and infrastructure outages (Ollama or the
   backend unreachable) — never on ordinary user mistakes (wrong file type, ambiguous group),
   which just get a normal reply to the sender.
-- **Mailbox access is via Microsoft Graph** (`app/mail/graph_client.py`), not IMAP, since modern
-  Microsoft 365 tenants increasingly disable legacy IMAP/basic-auth. Mail access is behind a
-  `MailClient` interface (`app/mail/base.py`) so an IMAP implementation could be added later for
-  a non-Microsoft mailbox.
+- **Mail access is provider-agnostic** via a `MailClient` interface (`app/mail/base.py`). The app
+  supports Microsoft Graph and a generic IMAP/SMTP provider implementation (`app/mail/imap_client.py`)
+  for dedicated project mailboxes such as `mailbox.org`.
+- **`assess_query` is a dry-run-only capability test.** Requests that would need information from
+  conversation transcripts, a group's GitHub repo, and/or its Trello board are classified into a
+  sixth operation whose reply describes which of those sources the model would consult and why —
+  never a claimed finding. It exists to validate the LLM's source-routing decisions ahead of
+  building the real integrations; see the `RUN_OLLAMA_TESTS=1` corpus in
+  `tests/test_command_parser_llm.py` for the automated version of that check.
 
 The full reasoning is in the approved implementation plan; the security boundary is unchanged
 from the spec: the LLM only ever produces a `ParsedCommand` (`app/commands/schema.py`), which is
@@ -108,7 +113,20 @@ Edit `.env`:
   reply instead of a silent drop when they aren't a registered owner.
 - `GRAPH_TENANT_ID` / `GRAPH_CLIENT_ID` / `GRAPH_CLIENT_SECRET`: see "Mailbox setup" below.
 
-### 5. Mailbox setup (Microsoft Graph)
+### 5. Mailbox setup
+
+Choose one of the supported providers:
+
+#### Option A: mailbox.org / other IMAP+SMTP provider
+
+1. Create a dedicated project mailbox.
+2. Enable IMAP and SMTP access in the provider dashboard.
+3. Create an app password or use the provider's supported automation credentials.
+4. Put the mailbox username and password into `.env` as `MAIL_USERNAME` and `MAIL_PASSWORD`.
+5. Set `mail.provider: mail` and `mail.mailbox_upn` in `config/config.yaml` to the mailbox address.
+6. Use TLS/STARTTLS-only outbound and inbound access, and keep the mailbox separate from personal or university accounts.
+
+#### Option B: Microsoft Graph
 
 1. In Azure AD / Entra ID, register a new application.
 2. Under **API permissions**, add **Application** permissions (not delegated)
@@ -125,12 +143,35 @@ Edit `.env`:
 
 ### 6. Run
 
+#### Option A: directly with Python
+
 ```bash
 python -m app.main
 ```
 
 This starts two background threads: one polling the mailbox and parsing/validating requests,
 and one draining the job queue (submitting accepted transcripts to the backend).
+
+#### Option B: Docker
+
+For a portable server deployment (`git clone` + `docker-compose up`, no Python environment to set
+up on the host). Ollama and the backend are **not** included in the compose stack — they're
+expected to already be reachable (e.g. running on the same host, or elsewhere on the network).
+
+1. Complete steps 4 and 5 above (`config/config.yaml` and `.env`) as normal.
+2. Since `localhost` inside a container refers to the container itself, not the host, point
+   `llm.host` and `backend.base_url` in `config/config.yaml` at wherever Ollama/the backend
+   actually are reachable from — if they're running directly on the same server, use
+   `http://host.docker.internal:11434` and `http://host.docker.internal:8000` (the compose file
+   maps this hostname to the host on Linux too, not just Docker Desktop).
+3. `mkdir -p data` (so the bind-mounted volume exists before the container's non-root user needs
+   to write to it).
+4. `docker-compose up -d --build`
+5. `docker-compose logs -f` to watch it start; `docker-compose down` to stop it.
+
+`./data` is bind-mounted, so the SQLite job store, queued attachments, and logs persist across
+restarts and rebuilds. The image intentionally excludes test dependencies and `tests/` — run the
+test suite from the host venv (see "Testing" below), not inside the container.
 
 ## Testing
 
@@ -154,7 +195,13 @@ doesn't depend on how a real model happens to behave on a given day.
   from this project's own job store, and `cancel` only works while a job is still queued locally
   (not yet dispatched to the backend) — there's nothing to safely roll back once a Meeting has
   been created.
-- Only Microsoft Graph is implemented as a mail provider; IMAP would need a second `MailClient`
-  implementation behind the same interface.
+- The app supports Microsoft Graph and a generic IMAP/SMTP provider implementation for dedicated
+  project mailboxes such as `mailbox.org`; the provider is chosen via `mail.provider`.
 - A speaker label in a transcript that can't be matched to a known `GroupMember` is reported to
   the sender, not auto-created as a new member (avoids roster pollution from typos).
+- `assess_query` doesn't actually query GitHub, Trello, or past transcripts yet — no such clients
+  exist. It only reports the plan the model would follow, so its accuracy can be evaluated before
+  those integrations are built.
+
+See [ROADMAP.md](ROADMAP.md) for planned follow-on work, including wiring up real source clients
+and a scheduled weekly per-group update.

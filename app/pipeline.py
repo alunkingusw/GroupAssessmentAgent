@@ -28,6 +28,7 @@ from app.email_templates.render import (
     render_failure,
     render_unrecognised_sender,
 )
+from app.handlers import assess_query as assess_query_handler
 from app.handlers import cancel as cancel_handler
 from app.handlers import help as help_handler
 from app.handlers import results as results_handler
@@ -219,6 +220,8 @@ class EmailProcessingPipeline:
             outcome = results_handler.handle(validated, sender_email, self._job_store, self._outbox)
         elif validated.operation == Operation.CANCEL:
             outcome = cancel_handler.handle(validated, sender_email, self._job_store, self._outbox)
+        elif validated.operation == Operation.ASSESS_QUERY:
+            outcome = assess_query_handler.handle(validated, sender_email, self._outbox)
         elif validated.operation == Operation.HELP:
             outcome = help_handler.handle(sender_email, self._outbox)
         else:

@@ -5,6 +5,7 @@ venv/
 *.egg-info/
 
 .env
+config/config.yaml
 data/
 !data/.gitkeep
 

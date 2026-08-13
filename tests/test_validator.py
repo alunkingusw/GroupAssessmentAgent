@@ -167,6 +167,46 @@ def test_cancel_with_return_statistics_ignored_gracefully(db_path: Path):
     assert result.job_id == job.job_id
 
 
+# --- assess_query: dry-run source selection ---
+
+def test_assess_query_single_source_validates_and_others_stay_none(db_path: Path):
+    cmd = ParsedCommand(operation=Operation.ASSESS_QUERY, github_focus="open issues about auth")
+    result = validate_command(cmd, _ctx(db_path))
+    assert result.operation == Operation.ASSESS_QUERY
+    assert result.github_focus == "open issues about auth"
+    assert result.transcript_focus is None
+    assert result.trello_focus is None
+
+
+def test_assess_query_multiple_sources_all_pass_through(db_path: Path):
+    cmd = ParsedCommand(
+        operation=Operation.ASSESS_QUERY,
+        transcript_focus="mentions of the API redesign",
+        github_focus="open issues about the API",
+        trello_focus="cards tagged API",
+    )
+    result = validate_command(cmd, _ctx(db_path))
+    assert result.transcript_focus == "mentions of the API redesign"
+    assert result.github_focus == "open issues about the API"
+    assert result.trello_focus == "cards tagged API"
+
+
+def test_assess_query_with_no_sources_asks_for_clarification(db_path: Path):
+    cmd = ParsedCommand(operation=Operation.ASSESS_QUERY)
+    with pytest.raises(ClarificationRequired):
+        validate_command(cmd, _ctx(db_path))
+
+
+def test_assess_query_group_hint_passes_through(db_path: Path):
+    cmd = ParsedCommand(
+        operation=Operation.ASSESS_QUERY,
+        group_hint="Tuesday Project Group",
+        trello_focus="open cards",
+    )
+    result = validate_command(cmd, _ctx(db_path))
+    assert result.group_hint == "Tuesday Project Group"
+
+
 # --- help ---
 
 def test_help_needs_nothing_else(db_path: Path):

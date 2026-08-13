@@ -28,6 +28,18 @@ HELP_JSON = (
     '"mentioned_date": null, "return_statistics": false, "requires_clarification": false, '
     '"clarification_question": null}'
 )
+ASSESS_QUERY_JSON = (
+    '{"operation": "assess_query", "attachment": null, "group_hint": null, "job_id": null, '
+    '"mentioned_date": null, "return_statistics": false, '
+    '"transcript_focus": "mentions of the API redesign", "github_focus": "open API issues", '
+    '"trello_focus": null, "requires_clarification": false, "clarification_question": null}'
+)
+ASSESS_QUERY_NO_SOURCES_JSON = (
+    '{"operation": "assess_query", "attachment": null, "group_hint": null, "job_id": null, '
+    '"mentioned_date": null, "return_statistics": false, '
+    '"transcript_focus": null, "github_focus": null, "trello_focus": null, '
+    '"requires_clarification": false, "clarification_question": null}'
+)
 
 
 def _vtt_attachment(fixture="valid_with_date.vtt", filename="meeting.vtt"):
@@ -206,6 +218,41 @@ def test_llm_parse_failure_sends_clarification_and_admin_alert(db_path: Path, tm
     recipients = {m.to for m in mail.sent}
     assert "alice@uni.ac.uk" in recipients
     assert "admin@uni.ac.uk" in recipients
+
+
+def test_assess_query_end_to_end_sends_plan_reply(db_path: Path, tmp_path: Path):
+    mail = FakeMailClient()
+    msg = make_test_email(
+        "alice@uni.ac.uk",
+        body_text="Have we discussed the API redesign, and are there any related GitHub issues?",
+        auth_signals=PASS,
+    )
+    mail.add_message(msg)
+
+    pipeline, job_store, outbox, admin, storage, _ = _build_pipeline(db_path, tmp_path, mail, ASSESS_QUERY_JSON)
+    pipeline.poll_once()
+    pipeline.flush_outbox()
+
+    assert len(mail.sent) == 1
+    body = mail.sent[0].body_text
+    assert "mentions of the API redesign" in body
+    assert "open API issues" in body
+    assert "Trello board:" not in body
+
+
+def test_assess_query_with_no_sources_sends_clarification(db_path: Path, tmp_path: Path):
+    mail = FakeMailClient()
+    msg = make_test_email("alice@uni.ac.uk", body_text="Can you help with this?", auth_signals=PASS)
+    mail.add_message(msg)
+
+    pipeline, job_store, outbox, admin, storage, _ = _build_pipeline(
+        db_path, tmp_path, mail, ASSESS_QUERY_NO_SOURCES_JSON
+    )
+    pipeline.poll_once()
+    pipeline.flush_outbox()
+
+    assert len(mail.sent) == 1
+    assert "clarif" in mail.sent[0].subject.lower()
 
 
 def test_audio_attachment_is_rejected_without_an_admin_alert(db_path: Path, tmp_path: Path):

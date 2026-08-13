@@ -26,6 +26,7 @@ OutcomeType = Literal[
     "results_reply",
     "cancelled",
     "cannot_cancel",
+    "assess_query_reply",
     "help_reply",
     "rejected",
 ]

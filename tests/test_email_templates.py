@@ -91,3 +91,21 @@ def test_unrecognised_sender_includes_admin_contact():
 def test_unrecognised_sender_without_admin_email_configured_still_renders():
     _, body = render.render_unrecognised_sender(None)
     assert "administrator" in body.lower()
+
+
+def test_assess_plan_lists_only_populated_sources():
+    _, body = render.render_assess_plan(
+        transcript_focus="mentions of the API redesign",
+        github_focus=None,
+        trello_focus="cards tagged API",
+    )
+    assert "mentions of the API redesign" in body
+    assert "cards tagged API" in body
+    assert "GitHub repo" not in body
+
+
+def test_assess_plan_omits_unpopulated_source_lines():
+    _, body = render.render_assess_plan(transcript_focus=None, github_focus=None, trello_focus=None)
+    assert "Meeting/conversation transcripts:" not in body
+    assert "GitHub repo:" not in body
+    assert "Trello board:" not in body

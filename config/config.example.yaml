@@ -2,8 +2,8 @@
 # Secrets (mailbox credentials, admin email, authorised domains) go in .env, not here.
 
 mail:
-  provider: graph               # graph | imap | fake
-  mailbox_upn: diarisation@yourtenant.onmicrosoft.com
+  provider: mail                # graph | mail | fake
+  mailbox_upn: yourproject@yourmailbox.example
   poll_interval_seconds: 30
   move_to_folder: null          # e.g. "Processed" - optional, mail is never deleted
   max_body_chars_to_llm: 4000

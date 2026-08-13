@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 class MailSettings(BaseModel):
-    provider: str = "graph"  # graph|imap|fake
+    provider: str = "graph"  # graph|mail|fake
     mailbox_upn: str = ""
     poll_interval_seconds: float = 30.0
     move_to_folder: Optional[str] = None
@@ -83,6 +83,8 @@ class Settings(BaseModel):
     # secrets, from environment / .env only - never from the yaml file
     admin_email: Optional[str] = None
     authorised_email_domains: list[str] = Field(default_factory=list)
+    mail_username: Optional[str] = None
+    mail_password: Optional[str] = None
     graph_tenant_id: Optional[str] = None
     graph_client_id: Optional[str] = None
     graph_client_secret: Optional[str] = None
@@ -122,6 +124,8 @@ def load_settings(
         settings.authorised_email_domains = [
             d.strip().lower() for d in domains.split(",") if d.strip()
         ]
+    settings.mail_username = os.getenv("MAIL_USERNAME") or settings.mail_username
+    settings.mail_password = os.getenv("MAIL_PASSWORD") or settings.mail_password
     settings.graph_tenant_id = os.getenv("GRAPH_TENANT_ID") or settings.graph_tenant_id
     settings.graph_client_id = os.getenv("GRAPH_CLIENT_ID") or settings.graph_client_id
     settings.graph_client_secret = os.getenv("GRAPH_CLIENT_SECRET") or settings.graph_client_secret

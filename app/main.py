@@ -17,6 +17,7 @@ from app.llm.ollama_client import OllamaClient
 from app.logging_config import configure_logging
 from app.mail.base import MailClient
 from app.mail.fake_client import FakeMailClient
+from app.mail.imap_client import ImapMailClient
 from app.mail.graph_client import GraphMailClient
 from app.mail.thread_matcher import ThreadMatcher
 from app.pipeline import EmailProcessingPipeline
@@ -39,11 +40,21 @@ def build_mail_client(settings: Settings) -> MailClient:
             settings.graph_client_secret,
             settings.mail.mailbox_upn,
         )
+    if settings.mail.provider == "mail":
+        if not (settings.mail_username and settings.mail_password):
+            raise RuntimeError(
+                "mail.provider is 'mail' but MAIL_USERNAME and MAIL_PASSWORD must both be set in .env"
+            )
+        return ImapMailClient(
+            settings.mail_username,
+            settings.mail_password,
+            mailbox_name=settings.mail.mailbox_upn or settings.mail_username,
+        )
     if settings.mail.provider == "fake":
         return FakeMailClient()
     raise RuntimeError(
-        f"Unsupported mail.provider {settings.mail.provider!r} - only 'graph' and 'fake' are "
-        "currently implemented (see Specification.md S5/S7 for extending this to IMAP)."
+        f"Unsupported mail.provider {settings.mail.provider!r} - only 'graph', 'mail', and 'fake' are "
+        "currently implemented."
     )
 
 

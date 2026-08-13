@@ -25,6 +25,7 @@ class Operation(str, Enum):
     STATUS = "status"
     RESULTS = "results"
     CANCEL = "cancel"
+    ASSESS_QUERY = "assess_query"
     HELP = "help"
 
 
@@ -42,6 +43,9 @@ class ParsedCommand(BaseModel):
     job_id: Optional[str] = Field(default=None, pattern=JOB_ID_PATTERN.pattern)
     mentioned_date: Optional[str] = Field(default=None, max_length=64)
     return_statistics: bool = False
+    transcript_focus: Optional[str] = Field(default=None, max_length=300)
+    github_focus: Optional[str] = Field(default=None, max_length=300)
+    trello_focus: Optional[str] = Field(default=None, max_length=300)
     requires_clarification: bool = False
     clarification_question: Optional[str] = Field(default=None, max_length=500)
 
@@ -54,7 +58,15 @@ class ParsedCommand(BaseModel):
             raise ValueError("attachment must be a bare filename, not a path")
         return v
 
-    @field_validator("attachment", "group_hint", "clarification_question", "mentioned_date")
+    @field_validator(
+        "attachment",
+        "group_hint",
+        "clarification_question",
+        "mentioned_date",
+        "transcript_focus",
+        "github_focus",
+        "trello_focus",
+    )
     @classmethod
     def _strip_and_reject_blank(cls, v: Optional[str]) -> Optional[str]:
         if v is None:

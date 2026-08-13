@@ -102,6 +102,21 @@ def render_cannot_cancel(job_id: str, status_text: str) -> tuple[str, str]:
     return subject, body
 
 
+def render_assess_plan(
+    transcript_focus: Optional[str],
+    github_focus: Optional[str],
+    trello_focus: Optional[str],
+) -> tuple[str, str]:
+    subject = "How I'd approach your question"
+    body = _render(
+        "assess_plan.txt.j2",
+        transcript_focus=transcript_focus,
+        github_focus=github_focus,
+        trello_focus=trello_focus,
+    )
+    return subject, body
+
+
 def render_help() -> tuple[str, str]:
     subject = "What can I ask this system to do?"
     body = _render("help.txt.j2")

@@ -64,6 +64,9 @@ class ValidatedCommand:
     mentioned_date: Optional[str] = None
     job_id: Optional[str] = None
     return_statistics: bool = False
+    transcript_focus: Optional[str] = None
+    github_focus: Optional[str] = None
+    trello_focus: Optional[str] = None
 
 
 def validate_command(cmd: ParsedCommand, ctx: ValidationContext) -> ValidatedCommand:
@@ -81,6 +84,8 @@ def validate_command(cmd: ParsedCommand, ctx: ValidationContext) -> ValidatedCom
         return _validate_submit_transcript(cmd, ctx)
     if cmd.operation in (Operation.STATUS, Operation.RESULTS, Operation.CANCEL):
         return _validate_job_reference_operation(cmd, ctx)
+    if cmd.operation == Operation.ASSESS_QUERY:
+        return _validate_assess_query(cmd, ctx)
     if cmd.operation == Operation.HELP:
         return ValidatedCommand(operation=Operation.HELP)
 
@@ -174,6 +179,22 @@ def _validate_job_reference_operation(
         operation=cmd.operation,
         job_id=job_id,
         return_statistics=cmd.return_statistics,
+    )
+
+
+def _validate_assess_query(cmd: ParsedCommand, ctx: ValidationContext) -> ValidatedCommand:
+    if not (cmd.transcript_focus or cmd.github_focus or cmd.trello_focus):
+        raise ClarificationRequired(
+            "I couldn't tell whether this needs checking against meeting transcripts, the "
+            "GitHub repo, the Trello board, or some combination - could you say a bit more "
+            "about what you're trying to find out?"
+        )
+    return ValidatedCommand(
+        operation=Operation.ASSESS_QUERY,
+        group_hint=cmd.group_hint,
+        transcript_focus=cmd.transcript_focus,
+        github_focus=cmd.github_focus,
+        trello_focus=cmd.trello_focus,
     )
 
 

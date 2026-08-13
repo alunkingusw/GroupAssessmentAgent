@@ -1,0 +1,17 @@
+This is a dry run - I can describe the plan I'd follow, but I can't yet actually check any of
+these sources. To answer this, here's what I would look at:
+{% if transcript_focus %}
+
+- Meeting/conversation transcripts: {{ transcript_focus }}
+{% endif %}
+{% if github_focus %}
+
+- The group's GitHub repo: {{ github_focus }}
+{% endif %}
+{% if trello_focus %}
+
+- The group's Trello board: {{ trello_focus }}
+{% endif %}
+
+Support for actually querying GitHub and Trello, and searching past transcripts, isn't built
+yet - nothing above has actually been looked up.
