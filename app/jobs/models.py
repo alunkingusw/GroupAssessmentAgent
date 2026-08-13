@@ -61,6 +61,9 @@ class Job:
     backend_raw_file_id: Optional[int] = None
     resolved_attendees: list[dict] = field(default_factory=list)
     unresolved_speakers: list[str] = field(default_factory=list)
+    transcript_focus: Optional[str] = None
+    github_focus: Optional[str] = None
+    trello_focus: Optional[str] = None
     error: Optional[str] = None
     retry_count: int = 0
     created_at: str = field(default_factory=utcnow_iso)
@@ -98,6 +101,9 @@ class Job:
                 if row["unresolved_speakers_json"]
                 else []
             ),
+            transcript_focus=row["transcript_focus"],
+            github_focus=row["github_focus"],
+            trello_focus=row["trello_focus"],
             error=row["error"],
             retry_count=row["retry_count"],
             created_at=row["created_at"],

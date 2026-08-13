@@ -102,17 +102,29 @@ def render_cannot_cancel(job_id: str, status_text: str) -> tuple[str, str]:
     return subject, body
 
 
-def render_assess_plan(
-    transcript_focus: Optional[str],
-    github_focus: Optional[str],
-    trello_focus: Optional[str],
+def render_assess_ack(job_id: str) -> tuple[str, str]:
+    subject = f"Looking into your question — {job_id}"
+    body = _render("assess_ack.txt.j2", job_id=job_id)
+    return subject, body
+
+
+def render_assess_result(
+    job_id: str,
+    group_name: Optional[str],
+    transcript_answer: Optional[str],
+    github_trello_answer: Optional[str],
+    trello_checked: bool,
+    unavailable_notes: list[str],
 ) -> tuple[str, str]:
-    subject = "How I'd approach your question"
+    subject = f"Here's what I found — {job_id}"
     body = _render(
-        "assess_plan.txt.j2",
-        transcript_focus=transcript_focus,
-        github_focus=github_focus,
-        trello_focus=trello_focus,
+        "assess_result.txt.j2",
+        job_id=job_id,
+        group_name=group_name,
+        transcript_answer=transcript_answer,
+        github_trello_answer=github_trello_answer,
+        trello_checked=trello_checked,
+        unavailable_notes=unavailable_notes,
     )
     return subject, body
 

@@ -9,7 +9,9 @@ import time
 
 from app.admin.notifier import AdminNotifier
 from app.auth.authorisation import SenderAuthoriser
+from app.diarisation.admin_client import AdminDiarisationApiError, AdminDiarisationClient
 from app.diarisation.client import DiarisationClient
+from app.github_raginator.client import GithubRaginatorClient
 from app.jobs.store import JobStore, Outbox, ProcessedMessageStore
 from app.jobs.worker import JobWorker
 from app.llm.command_parser import EmailCommandParser
@@ -58,6 +60,39 @@ def build_mail_client(settings: Settings) -> MailClient:
     )
 
 
+def load_group_owners(settings: Settings) -> dict[str, int]:
+    """Authorised sender emails now come live from meeting_diarisation's /admin/group-owners
+    (backend/routes/admin.py there) rather than a static map. `authorisation.group_owners` in
+    config.yaml is kept as an explicit override for tests/the fake mail-provider dev loop, which
+    shouldn't need a live backend - if it's set, it wins outright and the backend is never
+    called. Otherwise, a failure to reach the backend (or no service key configured) logs a
+    warning and starts with an empty map - authorising nobody - rather than crash-looping,
+    matching this project's "be conservative, never guess" pattern (see app/auth/authorisation.py)."""
+    if settings.authorisation.group_owners:
+        return settings.authorisation.group_owners
+
+    if not settings.diarisation_service_api_key:
+        logger.warning(
+            "No DIARISATION_SERVICE_API_KEY set and no static authorisation.group_owners "
+            "override in config.yaml - starting with no authorised senders."
+        )
+        return {}
+
+    with AdminDiarisationClient(
+        settings.backend.base_url,
+        settings.diarisation_service_api_key,
+        settings.backend.request_timeout_seconds,
+    ) as admin_client:
+        try:
+            return admin_client.get_group_owners()
+        except AdminDiarisationApiError:
+            logger.exception(
+                "Could not fetch group-owners from meeting_diarisation at startup - "
+                "starting with no authorised senders."
+            )
+            return {}
+
+
 def run(settings: Settings) -> None:
     settings.ensure_storage_dirs()
     configure_logging(settings)
@@ -71,7 +106,7 @@ def run(settings: Settings) -> None:
         settings.storage.db_path, outbox, settings.admin_email, settings.admin.alert_cooldown_minutes
     )
     authoriser = SenderAuthoriser(
-        settings.authorisation.group_owners,
+        load_group_owners(settings),
         settings.authorised_email_domains,
         settings.authorisation.require_auth_pass,
     )
@@ -88,6 +123,12 @@ def run(settings: Settings) -> None:
         settings.backend.max_retry_attempts,
         settings.backend.retry_backoff_seconds,
     )
+    github_raginator_client = GithubRaginatorClient(
+        settings.github_raginator.base_url,
+        settings.github_raginator.request_timeout_seconds,
+        settings.github_raginator.max_retry_attempts,
+        settings.github_raginator.retry_backoff_seconds,
+    )
 
     pipeline = EmailProcessingPipeline(
         mail_client,
@@ -103,7 +144,15 @@ def run(settings: Settings) -> None:
         settings.limits,
         settings.admin_email,
     )
-    worker = JobWorker(job_store, diarisation_client, outbox, admin_notifier, settings.storage)
+    worker = JobWorker(
+        job_store,
+        diarisation_client,
+        outbox,
+        admin_notifier,
+        settings.storage,
+        github_raginator_client,
+        ollama_client,
+    )
 
     stop_event = threading.Event()
 
@@ -147,6 +196,7 @@ def run(settings: Settings) -> None:
         mail_thread.join(timeout=5.0)
         ollama_client.close()
         diarisation_client.close()
+        github_raginator_client.close()
         logger.info("GroupAssessmentAgent stopped.")
 
 

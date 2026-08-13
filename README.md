@@ -38,12 +38,17 @@ adjusted as follows:
 - **Mail access is provider-agnostic** via a `MailClient` interface (`app/mail/base.py`). The app
   supports Microsoft Graph and a generic IMAP/SMTP provider implementation (`app/mail/imap_client.py`)
   for dedicated project mailboxes such as `mailbox.org`.
-- **`assess_query` is a dry-run-only capability test.** Requests that would need information from
-  conversation transcripts, a group's GitHub repo, and/or its Trello board are classified into a
-  sixth operation whose reply describes which of those sources the model would consult and why —
-  never a claimed finding. It exists to validate the LLM's source-routing decisions ahead of
-  building the real integrations; see the `RUN_OLLAMA_TESTS=1` corpus in
-  `tests/test_command_parser_llm.py` for the automated version of that check.
+- **`assess_query` answers real questions from three sources**: past meeting transcripts
+  (meeting_diarisation's `/groups/{id}/transcripts/search`, synthesised into a cited prose answer
+  via a second, narrowly-scoped Ollama call — see `app/llm/transcript_synthesis.py`), and the
+  group's GitHub repo/Trello board (GitHub-RAGinator's `/query`, which returns its own
+  LLM-synthesised answer). The LLM only ever decides *which* sources are relevant
+  (`transcript_focus`/`github_focus`/`trello_focus`) — the queries themselves are deterministic
+  API calls, same trust-boundary pattern as everything else in this codebase. Like
+  `submit_transcript`, it's split into `accept()`/`execute()` so a slow or unreachable source
+  never blocks mail polling; a source being unreachable degrades the reply with a note rather
+  than failing the whole request, as long as at least one requested source answered. See the
+  `RUN_OLLAMA_TESTS=1` corpus in `tests/test_command_parser_llm.py` for source-routing checks.
 
 The full reasoning is in the approved implementation plan; the security boundary is unchanged
 from the spec: the LLM only ever produces a `ParsedCommand` (`app/commands/schema.py`), which is
@@ -199,9 +204,10 @@ doesn't depend on how a real model happens to behave on a given day.
   project mailboxes such as `mailbox.org`; the provider is chosen via `mail.provider`.
 - A speaker label in a transcript that can't be matched to a known `GroupMember` is reported to
   the sender, not auto-created as a new member (avoids roster pollution from typos).
-- `assess_query` doesn't actually query GitHub, Trello, or past transcripts yet — no such clients
-  exist. It only reports the plan the model would follow, so its accuracy can be evaluated before
-  those integrations are built.
+- `assess_query`'s `results`/`status` commands don't show anything assess_query-specific if
+  looked up afterward by job ID — those templates are still submit_transcript-shaped (group/
+  meeting/attendees). Not a real gap in practice: the actual answer is always emailed
+  automatically once the job completes, same as submit_transcript's completion email.
 
 See [ROADMAP.md](ROADMAP.md) for planned follow-on work, including wiring up real source clients
 and a scheduled weekly per-group update.

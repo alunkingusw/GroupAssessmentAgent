@@ -10,10 +10,14 @@ mail:
 
 authorisation:
   require_auth_pass: true       # fail closed if SPF/DKIM/DMARC don't pass
-  group_owners:
-    # authorised sender email -> backend user_id (see group_meeting_transcripts /users/)
-    alice@university.ac.uk: 12
-    bob@university.ac.uk: 7
+  # group_owners is normally left unset - authorised senders are fetched live at startup from
+  # meeting_diarisation's /admin/group-owners endpoint (needs DIARISATION_SERVICE_API_KEY in
+  # .env to match meeting_diarisation's own SERVICE_API_KEY). Set group_owners here only as an
+  # explicit static override, e.g. for a backend-less dev run - if set, it wins outright and
+  # the live backend is never called:
+  # group_owners:
+  #   alice@university.ac.uk: 12
+  #   bob@university.ac.uk: 7
 
 llm:
   provider: ollama
@@ -23,8 +27,20 @@ llm:
   max_parse_retries: 2
 
 backend:
+  # If running all three projects together on the shared `project_net` Docker network (see
+  # docker-compose.yml), use meeting_diarisation's container name instead, e.g.
+  # http://diarisation-api:8000.
   base_url: http://localhost:8000
   request_timeout_seconds: 10
+  max_retry_attempts: 3
+  retry_backoff_seconds: 1.0
+
+github_raginator:
+  # Used by assess_query for github_focus/trello_focus. Same networked-vs-host-run note as
+  # backend.base_url above - use http://repo_analysis_app:8000 on the shared project_net
+  # network, or http://localhost:8010 (its published host port) for a host run.
+  base_url: http://localhost:8010
+  request_timeout_seconds: 120
   max_retry_attempts: 3
   retry_backoff_seconds: 1.0
 

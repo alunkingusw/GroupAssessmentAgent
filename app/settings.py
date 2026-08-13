@@ -45,6 +45,16 @@ class BackendSettings(BaseModel):
     retry_backoff_seconds: float = 1.0
 
 
+class GithubRaginatorSettings(BaseModel):
+    base_url: str = "http://localhost:8010"
+    # /query does retrieval + a full LLM generation over the repo's activity - measured at
+    # 200s+ on CPU against a repo with an unusually large issue history. Raise further for a
+    # bigger/slower local model or an especially active repo.
+    request_timeout_seconds: float = 120.0
+    max_retry_attempts: int = 3
+    retry_backoff_seconds: float = 1.0
+
+
 class LimitsSettings(BaseModel):
     max_attachment_size_mb: float = 20.0
     allowed_attachment_extensions: list[str] = Field(default_factory=lambda: [".vtt"])
@@ -75,6 +85,7 @@ class Settings(BaseModel):
     authorisation: AuthorisationSettings = Field(default_factory=AuthorisationSettings)
     llm: LlmSettings = Field(default_factory=LlmSettings)
     backend: BackendSettings = Field(default_factory=BackendSettings)
+    github_raginator: GithubRaginatorSettings = Field(default_factory=GithubRaginatorSettings)
     limits: LimitsSettings = Field(default_factory=LimitsSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     admin: AdminSettings = Field(default_factory=AdminSettings)
@@ -88,6 +99,7 @@ class Settings(BaseModel):
     graph_tenant_id: Optional[str] = None
     graph_client_id: Optional[str] = None
     graph_client_secret: Optional[str] = None
+    diarisation_service_api_key: Optional[str] = None
 
     def ensure_storage_dirs(self) -> None:
         for d in (
@@ -129,5 +141,8 @@ def load_settings(
     settings.graph_tenant_id = os.getenv("GRAPH_TENANT_ID") or settings.graph_tenant_id
     settings.graph_client_id = os.getenv("GRAPH_CLIENT_ID") or settings.graph_client_id
     settings.graph_client_secret = os.getenv("GRAPH_CLIENT_SECRET") or settings.graph_client_secret
+    settings.diarisation_service_api_key = (
+        os.getenv("DIARISATION_SERVICE_API_KEY") or settings.diarisation_service_api_key
+    )
 
     return settings

@@ -3,25 +3,15 @@
 Planned work beyond the current MVP. Nothing here is scheduled or committed to a version — it's
 a backlog of known next steps, ordered roughly by dependency.
 
-## 1. Real source clients for `assess_query`
+## 1. ~~Real source clients for `assess_query`~~ — done
 
-`assess_query` (see README "Design decisions") currently only reports which of conversation
-transcripts / GitHub / Trello it *would* check — it doesn't check them. Before it can answer a
-question for real, each source needs an actual client:
-
-- **Transcript search**: query already-submitted `.vtt` transcripts (via the backend, or local
-  storage) for content matching `transcript_focus`.
-- **GitHub**: a read-only client (REST or GraphQL API) scoped to each group's repo — issues,
-  PRs, commit activity. Needs per-group repo configuration (likely alongside `group_owners` in
-  `config.yaml`) and a token with minimal read scopes.
-- **Trello**: a read-only client (Trello REST API) scoped to each group's board — cards, lists,
-  due dates. Needs per-group board configuration and an API key/token.
-
-Once these exist, `assess_query`'s handler moves from "describe the plan" to "run the plan and
-compile the results" — the sources selected by the LLM get queried independently, and their
-results are compiled into a single reply. The routing decision (which this phase's dry run
-validates) stays the trusted, LLM-driven part; the queries themselves stay deterministic
-API calls, same trust-boundary pattern as everything else in this codebase.
+`assess_query` now queries all three sources for real (see README "Design decisions"):
+meeting_diarisation's transcript search (chunked/indexed by a vendored copy of VTT-RAGinator,
+synthesised into a cited answer via Ollama) and GitHub-RAGinator's `/query` for GitHub/Trello
+(GitHub-RAGinator's own repo registration is kept in sync with meeting_diarisation's
+`Group.github_repo_url`/`trello_board_id` via `GitHub-RAGinator/scripts/sync_repos_from_diarisation.py`).
+Per-group repo/board configuration lives on meeting_diarisation's `Group` row, not in this
+project's `config.yaml`.
 
 ## 2. Scheduled weekly per-group update
 

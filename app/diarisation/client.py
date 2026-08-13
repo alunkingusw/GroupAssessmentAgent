@@ -81,6 +81,21 @@ class AttendeeSummary:
     name: str
 
 
+@dataclass
+class TranscriptChunk:
+    chunk_id: str
+    meeting_id: str
+    meeting_title: str
+    meeting_date: str
+    speaker: str
+    text: str
+    start_ts: str
+    end_ts: str
+
+    def citation(self) -> str:
+        return f"[{self.meeting_title}, {self.meeting_date}, {self.start_ts}-{self.end_ts}, {self.speaker}]"
+
+
 class DiarisationClient:
     def __init__(
         self,
@@ -185,6 +200,31 @@ class DiarisationClient:
             "POST", f"/groups/{group_id}/aliases/resolve", headers=_auth(token), json=body
         )
         return resp.json()
+
+    def search_transcripts(
+        self, token: str, group_id: int, query: str, meeting_id: Optional[int] = None
+    ) -> list[TranscriptChunk]:
+        """POST /groups/{id}/transcripts/search - semantic search over this group's already
+        submitted/transcribed meetings. Retrieval only, no LLM involved on the backend side."""
+        body: dict = {"query": query}
+        if meeting_id is not None:
+            body["meeting_id"] = meeting_id
+        resp = self._request(
+            "POST", f"/groups/{group_id}/transcripts/search", headers=_auth(token), json=body
+        )
+        return [
+            TranscriptChunk(
+                chunk_id=r["chunk_id"],
+                meeting_id=r["meeting_id"],
+                meeting_title=r["meeting_title"],
+                meeting_date=r["meeting_date"],
+                speaker=r["speaker"],
+                text=r["text"],
+                start_ts=r["start_ts"],
+                end_ts=r["end_ts"],
+            )
+            for r in resp.json().get("results", [])
+        ]
 
     # --- request plumbing --------------------------------------------------
 

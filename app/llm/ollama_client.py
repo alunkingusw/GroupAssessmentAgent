@@ -1,5 +1,8 @@
-"""Thin HTTP wrapper over Ollama's API. Nothing above this module knows or cares that Ollama
-specifically is being used - it only sees EmailCommandParser.parse_email()."""
+"""Thin HTTP wrapper over Ollama's API. Two callers: EmailCommandParser.parse_email() (command
+parsing, always json_mode=True - the LLM's output there is re-validated against a strict schema
+before anything acts on it) and app/llm/transcript_synthesis.py (assess_query's transcript_focus
+answers, json_mode=False - free text, but constrained to only summarise retrieved chunks, never
+invent facts)."""
 from __future__ import annotations
 
 import httpx
@@ -25,19 +28,20 @@ class OllamaClient:
         except httpx.HTTPError:
             return False
 
-    def generate(self, system_prompt: str, user_prompt: str, temperature: float = 0.0) -> str:
+    def generate(
+        self, system_prompt: str, user_prompt: str, temperature: float = 0.0, json_mode: bool = True
+    ) -> str:
+        payload = {
+            "model": self._model,
+            "system": system_prompt,
+            "prompt": user_prompt,
+            "stream": False,
+            "options": {"temperature": temperature},
+        }
+        if json_mode:
+            payload["format"] = "json"
         try:
-            resp = self._client.post(
-                "/api/generate",
-                json={
-                    "model": self._model,
-                    "system": system_prompt,
-                    "prompt": user_prompt,
-                    "format": "json",
-                    "stream": False,
-                    "options": {"temperature": temperature},
-                },
-            )
+            resp = self._client.post("/api/generate", json=payload)
         except httpx.HTTPError as e:
             raise OllamaUnavailable(f"Could not reach Ollama: {e}") from e
 

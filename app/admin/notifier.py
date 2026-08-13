@@ -4,7 +4,7 @@ Rate-limited per category (default 15 min cooldown) so a prolonged outage doesn'
 email per poll cycle. Delivery goes through the same Outbox as user-facing mail, so admin
 alerts get the same send-retry treatment (spec S20's "email sending fails" case).
 
-Deliberately narrow: only the four categories below ever trigger an alert. Ordinary user
+Deliberately narrow: only the categories below ever trigger an alert. Ordinary user
 mistakes handled by a normal clarification/rejection reply (wrong file type, ambiguous group,
 etc.) are NOT admin-alertable - see commands/validator.py's Rejected/ClarificationRequired.
 """
@@ -23,6 +23,7 @@ class AdminCategory(str, Enum):
     UNAUTHORISED_SENDER = "unauthorised_sender"
     LLM_PARSE_FAILURE = "llm_parse_failure"
     BACKEND_SUBMISSION_FAILURE = "backend_submission_failure"
+    ASSESS_QUERY_FAILURE = "assess_query_failure"
     INFRASTRUCTURE = "infrastructure"
 
 

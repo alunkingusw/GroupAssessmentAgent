@@ -18,7 +18,9 @@ class StubLLM:
     def is_available(self) -> bool:
         return self.available
 
-    def generate(self, system_prompt: str, user_prompt: str, temperature: float = 0.0) -> str:
+    def generate(
+        self, system_prompt: str, user_prompt: str, temperature: float = 0.0, json_mode: bool = True
+    ) -> str:
         response = self._responses[min(self.calls, len(self._responses) - 1)]
         self.calls += 1
         return response
@@ -28,8 +30,10 @@ from app.diarisation.client import (
     GroupSummary,
     MeetingSummary,
     RawFileSummary,
+    TranscriptChunk,
     TransientError,
 )
+from app.github_raginator.client import QueryResult, RepoSummary, TransientError as GithubTransientError
 
 
 class FakeDiarisationClient:
@@ -41,8 +45,10 @@ class FakeDiarisationClient:
         groups: list[GroupSummary],
         member_by_name: Optional[dict[str, Optional[int]]] = None,
         fail_on: Optional[str] = None,
+        transcript_chunks: Optional[list[TranscriptChunk]] = None,
     ):
         self.groups = groups
+        self.transcript_chunks = transcript_chunks or []
         self.member_by_name = member_by_name or {}
         self.fail_on = fail_on
         self.meetings: list[MeetingSummary] = []
@@ -87,3 +93,35 @@ class FakeDiarisationClient:
     ) -> dict[str, Optional[int]]:
         self._maybe_fail("resolve_aliases")
         return {name: self.member_by_name.get(name) for name in names}
+
+    def search_transcripts(
+        self, token: str, group_id: int, query: str, meeting_id: Optional[int] = None
+    ) -> list[TranscriptChunk]:
+        self._maybe_fail("search_transcripts")
+        return self.transcript_chunks
+
+
+class FakeGithubRaginatorClient:
+    """Duck-type stand-in for GithubRaginatorClient - no HTTP involved."""
+
+    def __init__(
+        self,
+        repo_by_group_name: Optional[dict[str, RepoSummary]] = None,
+        answer: str = "Alice made most of the recent commits.",
+        fail_on: Optional[str] = None,
+    ):
+        self.repo_by_group_name = repo_by_group_name or {}
+        self.answer = answer
+        self.fail_on = fail_on
+        self.questions_asked: list[str] = []
+
+    def find_repo_by_group_name(self, group_name: str) -> Optional[RepoSummary]:
+        if self.fail_on == "find_repo_by_group_name":
+            raise GithubTransientError("simulated failure in find_repo_by_group_name")
+        return self.repo_by_group_name.get(group_name)
+
+    def query(self, repo_id: int, question: str) -> QueryResult:
+        if self.fail_on == "query":
+            raise GithubTransientError("simulated failure in query")
+        self.questions_asked.append(question)
+        return QueryResult(answer=self.answer)

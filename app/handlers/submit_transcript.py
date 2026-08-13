@@ -7,13 +7,14 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional
 
 from dateutil import parser as dateutil_parser
 
 from app.admin.notifier import AdminCategory, AdminNotifier
 from app.commands.validator import ValidatedCommand
-from app.diarisation.client import DiarisationApiError, DiarisationClient, GroupSummary
+from app.diarisation.client import DiarisationApiError, DiarisationClient
+from app.diarisation.group_matching import Matched, group_clarification_question, match_group
 from app.email_templates.render import render_ack, render_clarification, render_completion, render_failure
 from app.handlers.base import HandlerOutcome
 from app.jobs.models import Job, JobState
@@ -101,9 +102,9 @@ def execute(
         token = diarisation_client.login(job.backend_user_id)
         groups = diarisation_client.list_groups(token)
 
-        match = _match_group(job.group_hint, groups)
-        if not isinstance(match, _Matched):
-            question = _group_clarification_question(match, groups)
+        match = match_group(job.group_hint, groups)
+        if not isinstance(match, Matched):
+            question = group_clarification_question(match, groups, "this transcript")
             job_store.set_status(job.job_id, JobState.NEEDS_CLARIFICATION)
             subject, body = render_clarification(question)
             outbox.enqueue(to_email=job.sender_email, subject=subject, body_text=body, job_id=job.job_id)
@@ -212,49 +213,3 @@ def _resolve_meeting_date(
         except (ValueError, OverflowError, dateutil_parser.ParserError):
             pass
     return received_at, "received_timestamp"
-
-
-# --- group matching (deterministic, never LLM-inferred) -------------------------------------
-
-
-class _Matched:
-    def __init__(self, group: GroupSummary):
-        self.group = group
-
-
-class _Ambiguous:
-    def __init__(self, candidates: list[GroupSummary]):
-        self.candidates = candidates
-
-
-class _NoMatch:
-    pass
-
-
-_MatchResult = Union[_Matched, _Ambiguous, _NoMatch]
-
-
-def _match_group(hint: Optional[str], groups: list[GroupSummary]) -> _MatchResult:
-    if not groups:
-        return _NoMatch()
-    if hint:
-        needle = hint.strip().lower()
-        matches = [g for g in groups if g.name.strip().lower() == needle]
-        if len(matches) == 1:
-            return _Matched(matches[0])
-        if len(matches) == 0:
-            return _NoMatch()
-        return _Ambiguous(matches)
-    if len(groups) == 1:
-        return _Matched(groups[0])
-    return _Ambiguous(groups)
-
-
-def _group_clarification_question(match: _MatchResult, groups: list[GroupSummary]) -> str:
-    if not groups:
-        return (
-            "You don't currently belong to any group in the system, so I can't file this "
-            "transcript anywhere. Please contact the admin."
-        )
-    names = ", ".join(g.name for g in groups)
-    return f"Which group is this transcript for? You belong to: {names}."

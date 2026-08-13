@@ -93,19 +93,32 @@ def test_unrecognised_sender_without_admin_email_configured_still_renders():
     assert "administrator" in body.lower()
 
 
-def test_assess_plan_lists_only_populated_sources():
-    _, body = render.render_assess_plan(
-        transcript_focus="mentions of the API redesign",
-        github_focus=None,
-        trello_focus="cards tagged API",
+def test_assess_ack_includes_job_id():
+    _, body = render.render_assess_ack("DIAR-2026-0811-0017")
+    assert "DIAR-2026-0811-0017" in body
+
+
+def test_assess_result_includes_only_populated_sections():
+    _, body = render.render_assess_result(
+        "DIAR-2026-0811-0017",
+        group_name="Team A",
+        transcript_answer="Alice raised this in the 11 Aug meeting.",
+        github_trello_answer=None,
+        trello_checked=False,
+        unavailable_notes=[],
     )
-    assert "mentions of the API redesign" in body
-    assert "cards tagged API" in body
-    assert "GitHub repo" not in body
+    assert "Alice raised this in the 11 Aug meeting." in body
+    assert "GitHub" not in body
 
 
-def test_assess_plan_omits_unpopulated_source_lines():
-    _, body = render.render_assess_plan(transcript_focus=None, github_focus=None, trello_focus=None)
-    assert "Meeting/conversation transcripts:" not in body
-    assert "GitHub repo:" not in body
-    assert "Trello board:" not in body
+def test_assess_result_includes_unavailable_notes():
+    _, body = render.render_assess_result(
+        "DIAR-2026-0811-0017",
+        group_name="Team A",
+        transcript_answer=None,
+        github_trello_answer="Bob opened issue #4.",
+        trello_checked=False,
+        unavailable_notes=["I couldn't check past meeting transcripts right now."],
+    )
+    assert "Bob opened issue #4." in body
+    assert "couldn't check past meeting transcripts" in body

@@ -13,7 +13,8 @@ from app.mail.thread_matcher import ThreadMatcher
 from app.pipeline import EmailProcessingPipeline
 from app.settings import LimitsSettings, StorageSettings
 
-from tests.fakes import FakeDiarisationClient, StubLLM
+from app.github_raginator.client import RepoSummary
+from tests.fakes import FakeDiarisationClient, FakeGithubRaginatorClient, StubLLM
 
 FIXTURES = Path(__file__).parent / "fixtures" / "vtt"
 PASS = AuthSignals(spf="pass", dkim="pass", dmarc="pass")
@@ -72,9 +73,19 @@ def _build_pipeline(db_path: Path, tmp_path: Path, mail_client, llm_response, ad
     return pipeline, job_store, outbox, admin, storage, stub_llm
 
 
-def _worker(job_store, storage, outbox, admin, groups, member_by_name=None):
-    fake_client = FakeDiarisationClient(groups=groups, member_by_name=member_by_name or {})
-    return JobWorker(job_store, fake_client, outbox, admin, storage), fake_client
+def _worker(
+    job_store, storage, outbox, admin, groups, member_by_name=None, transcript_chunks=None,
+    github_raginator_client=None, ollama_client=None,
+):
+    fake_client = FakeDiarisationClient(
+        groups=groups, member_by_name=member_by_name or {}, transcript_chunks=transcript_chunks
+    )
+    worker = JobWorker(
+        job_store, fake_client, outbox, admin, storage,
+        github_raginator_client or FakeGithubRaginatorClient(),
+        ollama_client or StubLLM("A synthesised answer."),
+    )
+    return worker, fake_client
 
 
 def test_full_happy_path_submit_transcript_end_to_end(db_path: Path, tmp_path: Path):
@@ -220,7 +231,7 @@ def test_llm_parse_failure_sends_clarification_and_admin_alert(db_path: Path, tm
     assert "admin@uni.ac.uk" in recipients
 
 
-def test_assess_query_end_to_end_sends_plan_reply(db_path: Path, tmp_path: Path):
+def test_assess_query_end_to_end_sends_ack_then_answer(db_path: Path, tmp_path: Path):
     mail = FakeMailClient()
     msg = make_test_email(
         "alice@uni.ac.uk",
@@ -234,10 +245,27 @@ def test_assess_query_end_to_end_sends_plan_reply(db_path: Path, tmp_path: Path)
     pipeline.flush_outbox()
 
     assert len(mail.sent) == 1
-    body = mail.sent[0].body_text
-    assert "mentions of the API redesign" in body
-    assert "open API issues" in body
-    assert "Trello board:" not in body
+    assert "job id" in mail.sent[0].body_text.lower()
+    job = job_store.list_queued()[0]
+    assert job.operation == "assess_query"
+    assert job.transcript_focus == "mentions of the API redesign"
+    assert job.github_focus == "open API issues"
+
+    worker, _ = _worker(
+        job_store, storage, outbox, admin, groups=[GroupSummary(id=1, name="Team A")],
+        transcript_chunks=[],
+        github_raginator_client=FakeGithubRaginatorClient(
+            repo_by_group_name={"Team A": RepoSummary(id=1, github_url="https://github.com/org/repo", group_name="Team A")},
+            answer="Alice opened issue #12 about the API redesign.",
+        ),
+    )
+    worker.run_once()
+    pipeline.flush_outbox()
+
+    assert job_store.get(job.job_id).status == JobState.COMPLETED
+    assert len(mail.sent) == 2
+    body = mail.sent[1].body_text
+    assert "Alice opened issue #12 about the API redesign." in body
 
 
 def test_assess_query_with_no_sources_sends_clarification(db_path: Path, tmp_path: Path):

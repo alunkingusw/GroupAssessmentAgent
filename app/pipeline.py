@@ -221,7 +221,9 @@ class EmailProcessingPipeline:
         elif validated.operation == Operation.CANCEL:
             outcome = cancel_handler.handle(validated, sender_email, self._job_store, self._outbox)
         elif validated.operation == Operation.ASSESS_QUERY:
-            outcome = assess_query_handler.handle(validated, sender_email, self._outbox)
+            outcome = assess_query_handler.accept(
+                validated, sender_email, sender_user_id, msg.message_id, self._job_store, self._outbox
+            )
         elif validated.operation == Operation.HELP:
             outcome = help_handler.handle(sender_email, self._outbox)
         else:
