@@ -1,8 +1,8 @@
 """Deterministic association of an inbound reply with an existing job.
 
-Never LLM-inferred (spec S16) - only header-based (In-Reply-To/References against a job's
-recorded last_response_message_id) or a single unambiguous DIAR-YYYY-MMDD-NNNN reference in the
-subject/body, and only ever resolved against jobs owned by the sender.
+Never LLM-inferred (spec S16) - only header-based (In-Reply-To/References against any recorded
+outbound response) or a single unambiguous DIAR-YYYY-MMDD-NNNN reference in the subject/body,
+and only ever resolved against jobs owned by the sender.
 """
 from __future__ import annotations
 
@@ -23,7 +23,9 @@ class ThreadMatcher:
 
     def match(self, msg: "EmailMessage", sender_email: str) -> Optional[str]:
         for ref in _referenced_message_ids(msg.in_reply_to, msg.references):
-            job = self._job_store.get_by_last_response_message_id(ref, sender_email)
+            job = self._job_store.get_by_response_message_id(ref, sender_email)
+            if job is None:
+                job = self._job_store.get_by_last_response_message_id(ref, sender_email)
             if job:
                 return job.job_id
 

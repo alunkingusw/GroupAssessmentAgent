@@ -74,6 +74,15 @@ class AdminSettings(BaseModel):
     alert_cooldown_minutes: float = 15.0
 
 
+class WeeklyUpdateSettings(BaseModel):
+    enabled: bool = False
+    weekday: int = 0
+    hour: int = 8
+    minute: int = 0
+    lookback_days: int = 7
+    recipient_mode: str = "group_owners"
+
+
 class LoggingSettings(BaseModel):
     level: str = "INFO"
     log_email_bodies: bool = False
@@ -89,6 +98,7 @@ class Settings(BaseModel):
     limits: LimitsSettings = Field(default_factory=LimitsSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     admin: AdminSettings = Field(default_factory=AdminSettings)
+    weekly_update: WeeklyUpdateSettings = Field(default_factory=WeeklyUpdateSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
     # secrets, from environment / .env only - never from the yaml file

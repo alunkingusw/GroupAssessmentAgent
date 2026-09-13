@@ -18,7 +18,7 @@ from app.diarisation.group_matching import Matched, group_clarification_question
 from app.email_templates.render import render_ack, render_clarification, render_completion, render_failure
 from app.handlers.base import HandlerOutcome
 from app.jobs.models import Job, JobState
-from app.jobs.store import JobStore, Outbox
+from app.jobs.store import JobStore, Outbox, PendingClarificationStore
 from app.mail.base import Attachment
 from app.settings import StorageSettings
 from app.storage.attachments import move_to, save_incoming
@@ -37,6 +37,8 @@ def accept(
     job_store: JobStore,
     outbox: Outbox,
     storage: StorageSettings,
+    in_reply_to: Optional[str] = None,
+    references: Optional[str] = None,
 ) -> HandlerOutcome:
     assert validated_cmd.attachment is not None  # guaranteed by the validator
 
@@ -62,7 +64,10 @@ def accept(
         parsed_vtt = parse_vtt(stored_path)
     except VttParseError as e:
         job_store.set_status(job.job_id, JobState.FAILED, error=str(e))
-        _fail_and_move(job.job_id, stored_path, storage, str(e), outbox, sender_email, job_store)
+        _fail_and_move(
+            job.job_id, stored_path, storage, str(e), outbox, sender_email, job_store,
+            in_reply_to, references,
+        )
         return HandlerOutcome("rejected", job.job_id)
 
     meeting_date, meeting_date_source = _resolve_meeting_date(
@@ -80,7 +85,10 @@ def accept(
     subject, body = render_ack(
         job.job_id, validated_cmd.attachment.filename, meeting_date.isoformat(), group_name=None
     )
-    outbox.enqueue(to_email=sender_email, subject=subject, body_text=body, job_id=job.job_id)
+    outbox.enqueue(
+        to_email=sender_email, subject=subject, body_text=body, job_id=job.job_id,
+        in_reply_to=in_reply_to, references=references,
+    )
     return HandlerOutcome("job_created", job.job_id)
 
 
@@ -91,7 +99,11 @@ def execute(
     outbox: Outbox,
     admin_notifier: AdminNotifier,
     storage: StorageSettings,
+    pending_clarifications: Optional[PendingClarificationStore] = None,
 ) -> None:
+    pending_clarifications = pending_clarifications or PendingClarificationStore(job_store._db_path)
+    parent_message_id = job.in_reply_to_message_id or job.source_message_id
+    parent_references = parent_message_id
     job_store.set_status(job.job_id, JobState.PROCESSING)
     if job.attachment_storage_path:
         moved = move_to(Path(job.attachment_storage_path), storage.processing)
@@ -106,8 +118,12 @@ def execute(
         if not isinstance(match, Matched):
             question = group_clarification_question(match, groups, "this transcript")
             job_store.set_status(job.job_id, JobState.NEEDS_CLARIFICATION)
-            subject, body = render_clarification(question)
-            outbox.enqueue(to_email=job.sender_email, subject=subject, body_text=body, job_id=job.job_id)
+            pending_clarifications.put(job.job_id, question, "group_hint", [g.name for g in groups])
+            subject, body = render_clarification(question, job.job_id)
+            outbox.enqueue(
+                to_email=job.sender_email, subject=subject, body_text=body, job_id=job.job_id,
+                in_reply_to=parent_message_id, references=parent_references,
+            )
             return
 
         group = match.group
@@ -148,7 +164,10 @@ def execute(
         subject, body = render_completion(
             job.job_id, group.name, job.meeting_date, resolved_attendees, unresolved_speakers
         )
-        outbox.enqueue(to_email=job.sender_email, subject=subject, body_text=body, job_id=job.job_id)
+        outbox.enqueue(
+            to_email=job.sender_email, subject=subject, body_text=body, job_id=job.job_id,
+            in_reply_to=parent_message_id, references=parent_references,
+        )
 
     except DiarisationApiError as e:
         _handle_execute_failure(job, str(e), job_store, outbox, admin_notifier, storage)
@@ -165,6 +184,8 @@ def _handle_execute_failure(
     admin_notifier: AdminNotifier,
     storage: StorageSettings,
 ) -> None:
+    parent_message_id = job.in_reply_to_message_id or job.source_message_id
+    parent_references = parent_message_id
     job_store.set_status(job.job_id, JobState.FAILED, error=reason)
     if job.attachment_storage_path and Path(job.attachment_storage_path).exists():
         moved = move_to(Path(job.attachment_storage_path), storage.failed)
@@ -175,7 +196,10 @@ def _handle_execute_failure(
         "Please try again later, or contact the admin if this continues.",
         job_id=job.job_id,
     )
-    outbox.enqueue(to_email=job.sender_email, subject=subject, body_text=body, job_id=job.job_id)
+    outbox.enqueue(
+        to_email=job.sender_email, subject=subject, body_text=body, job_id=job.job_id,
+        in_reply_to=parent_message_id, references=parent_references,
+    )
     admin_notifier.alert(
         AdminCategory.BACKEND_SUBMISSION_FAILURE,
         f"Job {job.job_id} failed while submitting to the backend.",
@@ -191,6 +215,8 @@ def _fail_and_move(
     outbox: Outbox,
     sender_email: str,
     job_store: JobStore,
+    in_reply_to: Optional[str] = None,
+    references: Optional[str] = None,
 ) -> None:
     if stored_path.exists():
         moved = move_to(stored_path, storage.failed)
@@ -199,7 +225,10 @@ def _fail_and_move(
         f"The attached file could not be read as a valid .vtt transcript: {reason}",
         job_id=job_id,
     )
-    outbox.enqueue(to_email=sender_email, subject=subject, body_text=body, job_id=job_id)
+    outbox.enqueue(
+        to_email=sender_email, subject=subject, body_text=body, job_id=job_id,
+        in_reply_to=in_reply_to, references=references,
+    )
 
 
 def _resolve_meeting_date(

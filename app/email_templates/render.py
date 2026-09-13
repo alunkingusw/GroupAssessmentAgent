@@ -32,9 +32,15 @@ def render_ack(job_id: str, filename: str, meeting_date: str, group_name: Option
     return subject, body
 
 
-def render_clarification(question: str) -> tuple[str, str]:
-    subject = "Clarification needed"
+def render_clarification(question: str, job_id: Optional[str] = None) -> tuple[str, str]:
+    subject = f"Clarification needed — {job_id}" if job_id else "Clarification needed"
     body = _render("clarification.txt.j2", question=question)
+    return subject, body
+
+
+def render_clarification_received(job_id: str, value: str) -> tuple[str, str]:
+    subject = f"Clarification received — {job_id}"
+    body = f"Thanks. I recorded '{value}' for {job_id} and queued it to continue processing.\n"
     return subject, body
 
 

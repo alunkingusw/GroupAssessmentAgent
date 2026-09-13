@@ -60,4 +60,4 @@ class MailClient(ABC):
         references: Optional[str] = None,
     ) -> str:
         """Sends an email. Returns the provider's Message-ID for the sent message, so it can
-        be recorded as a job's last_response_message_id for future thread matching."""
+        be recorded for future thread matching."""

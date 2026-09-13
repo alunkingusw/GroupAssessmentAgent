@@ -60,6 +60,14 @@ storage:
 admin:
   alert_cooldown_minutes: 15
 
+weekly_update:
+  enabled: false
+  weekday: 0              # Monday=0, Sunday=6
+  hour: 8
+  minute: 0
+  lookback_days: 7
+  recipient_mode: group_owners
+
 logging:
   level: INFO
   log_email_bodies: false

@@ -65,6 +65,7 @@ app/
   vtt/           WEBVTT transcript parser (speaker labels + NOTE meeting-date convention)
   diarisation/   HTTP client for the real backend (one method per endpoint used)
   jobs/          SQLite job store, inbound-message dedup, outbound mail queue, background worker
+  reports/       LangGraph weekly reports, persisted source evidence, and report replies
   handlers/      One handler per operation (submit_transcript, status, results, cancel, help)
   email_templates/  Jinja2 templates for every outbound email
   admin/         Rate-limited admin alerting
@@ -211,3 +212,32 @@ doesn't depend on how a real model happens to behave on a given day.
 
 See [ROADMAP.md](ROADMAP.md) for planned follow-on work, including wiring up real source clients
 and a scheduled weekly per-group update.
+
+## Weekly project updates
+
+The weekly update is a one-shot command intended to be invoked by cron or a system scheduler:
+
+```bash
+weekly-project-update --config config/config.yaml
+```
+
+For example, a Monday 08:00 cron entry is:
+
+```cron
+0 8 * * 1 /path/to/.venv/bin/weekly-project-update --config /path/to/config/config.yaml
+```
+
+Enable it with `weekly_update.enabled: true`. The command discovers each active group for every
+authorised owner, creates one idempotent `WEEKLY-YYYY-MM-DD-GROUP` report per period, and runs a
+LangGraph workflow that collects meeting, GitHub, and Trello evidence, persists that evidence in
+SQLite, synthesises a cited plain-text report, and sends it through the existing outbox.
+
+The current backend exposes transcript search and GitHub-RAGinator query endpoints rather than
+raw activity feeds. The source adapter therefore records the bounded query and its answer as
+evidence, while filtering transcript chunks by meeting date. When structured GitHub/Trello
+activity endpoints become available, they can replace `app/reports/sources.py` without changing
+the scheduler, report store, graph, or email workflow.
+
+Replies to a weekly report are matched by `In-Reply-To`/`References` or the report ID in the
+subject. They are answered from the persisted evidence snapshot and remain in the same outbound
+message-link history; the normal command parser is not used for report questions.

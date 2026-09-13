@@ -10,6 +10,7 @@ This is the file that embodies the core architectural boundary from the spec:
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Optional, Protocol
 
@@ -25,6 +26,7 @@ from app.commands.validator import (
 )
 from app.email_templates.render import (
     render_clarification,
+    render_clarification_received,
     render_failure,
     render_unrecognised_sender,
 )
@@ -34,13 +36,17 @@ from app.handlers import help as help_handler
 from app.handlers import results as results_handler
 from app.handlers import status as status_handler
 from app.handlers import submit_transcript
-from app.jobs.store import JobStore, Outbox, ProcessedMessageStore
+from app.jobs.store import JobStore, Outbox, PendingClarificationStore, ProcessedMessageStore
+from app.jobs.models import JobState
 from app.llm.command_parser import EmailCommandParser
 from app.mail.base import EmailMessage, MailClient
 from app.mail.thread_matcher import ThreadMatcher
+from app.reports.reply import WeeklyReportReplyService
+from app.reports.store import ReportStore
 from app.settings import LimitsSettings, StorageSettings
 
 logger = logging.getLogger(__name__)
+WEEKLY_REPORT_ID_RE = re.compile(r"WEEKLY-\d{4}-\d{2}-\d{2}-\d{4}")
 
 
 class HasIsAvailable(Protocol):
@@ -75,6 +81,9 @@ class EmailProcessingPipeline:
         self._storage = storage
         self._limits = limits
         self._admin_email = admin_email
+        self._pending_clarifications = PendingClarificationStore(job_store._db_path)
+        self._report_store = ReportStore(job_store._db_path)
+        self._report_replies = WeeklyReportReplyService(self._report_store, outbox, ollama_client)
 
     # --- inbound: fetch, authorise, parse, validate, dispatch ---------------------------------
 
@@ -103,7 +112,13 @@ class EmailProcessingPipeline:
 
         if auth_result.reason == AuthResultReason.UNRECOGNISED_IN_DOMAIN:
             subject, body = render_unrecognised_sender(self._admin_email)
-            self._outbox.enqueue(to_email=auth_result.sender_email, subject=subject, body_text=body)
+            self._outbox.enqueue(
+                to_email=auth_result.sender_email,
+                subject=subject,
+                body_text=body,
+                in_reply_to=msg.message_id,
+                references=_reply_references(msg),
+            )
             self._admin.alert(
                 AdminCategory.UNAUTHORISED_SENDER,
                 f"Unrecognised in-domain sender attempted to use the system: {auth_result.sender_email}",
@@ -125,6 +140,22 @@ class EmailProcessingPipeline:
 
         sender_email = auth_result.sender_email
         sender_user_id = auth_result.user_id
+        report = self._match_report(msg, sender_email)
+        if report is not None:
+            if not self._ollama.is_available():
+                logger.warning("Ollama unavailable - deferring weekly report reply %s", msg.message_id)
+                return
+            self._report_replies.reply(msg, report.report_id)
+            self._processed.finalize(
+                msg.message_id, outcome="weekly_report_reply", job_id=report.report_id,
+                operation="weekly_report_reply",
+            )
+            self._mail.mark_processed(msg.provider_ref)
+            return
+        thread_job_id = self._thread_matcher.match(msg, sender_email)
+
+        if thread_job_id and self._continue_clarification(msg, sender_email, thread_job_id):
+            return
 
         if not self._ollama.is_available():
             # Deliberately do NOT finalize or mark_processed: the message stays 'in_progress'
@@ -136,7 +167,6 @@ class EmailProcessingPipeline:
             return
 
         attachment_filenames = [a.filename for a in msg.attachments]
-        thread_job_id = self._thread_matcher.match(msg, sender_email)
 
         try:
             parsed_cmd = self._parser.parse_email(msg.body_text, attachment_filenames, thread_job_id)
@@ -170,27 +200,30 @@ class EmailProcessingPipeline:
             validated = validate_command(parsed_cmd, ctx)
         except ClarificationRequired as e:
             self._reply_and_finalize(
-                msg, *render_clarification(e.question), outcome="clarification_sent",
+                msg, *render_clarification(e.question, thread_job_id), outcome="clarification_sent",
                 operation=parsed_cmd.operation.value,
             )
             return
         except Rejected as e:
             self._reply_and_finalize(
-                msg, *render_failure(str(e)), outcome="rejected", operation=parsed_cmd.operation.value,
+                msg, *render_failure(str(e), thread_job_id), outcome="rejected", operation=parsed_cmd.operation.value,
             )
             return
 
         try:
-            job_id = self._dispatch(validated, msg, sender_email, sender_user_id)
+            job_id = self._dispatch(
+                validated, msg, sender_email, sender_user_id,
+                msg.message_id, _reply_references(msg),
+            )
         except ClarificationRequired as e:
             self._reply_and_finalize(
-                msg, *render_clarification(e.question), outcome="clarification_sent",
+                msg, *render_clarification(e.question, thread_job_id), outcome="clarification_sent",
                 operation=validated.operation.value,
             )
             return
         except Rejected as e:
             self._reply_and_finalize(
-                msg, *render_failure(str(e)), outcome="rejected", operation=validated.operation.value,
+                msg, *render_failure(str(e), thread_job_id), outcome="rejected", operation=validated.operation.value,
             )
             return
 
@@ -199,7 +232,10 @@ class EmailProcessingPipeline:
         )
         self._mail.mark_processed(msg.provider_ref)
 
-    def _dispatch(self, validated, msg: EmailMessage, sender_email: str, sender_user_id: int) -> Optional[str]:
+    def _dispatch(
+        self, validated, msg: EmailMessage, sender_email: str, sender_user_id: int,
+        in_reply_to: str, references: str,
+    ) -> Optional[str]:
         """The explicit, finite dispatch (spec S17) - deliberately not a generic
         operation-name-to-callable lookup, so the full set of possible actions is visible here."""
         if validated.operation == Operation.SUBMIT_TRANSCRIPT:
@@ -213,22 +249,86 @@ class EmailProcessingPipeline:
                 self._job_store,
                 self._outbox,
                 self._storage,
+                in_reply_to,
+                references,
             )
         elif validated.operation == Operation.STATUS:
-            outcome = status_handler.handle(validated, sender_email, self._job_store, self._outbox)
+            outcome = status_handler.handle(
+                validated, sender_email, self._job_store, self._outbox, in_reply_to, references
+            )
         elif validated.operation == Operation.RESULTS:
-            outcome = results_handler.handle(validated, sender_email, self._job_store, self._outbox)
+            outcome = results_handler.handle(
+                validated, sender_email, self._job_store, self._outbox, in_reply_to, references
+            )
         elif validated.operation == Operation.CANCEL:
-            outcome = cancel_handler.handle(validated, sender_email, self._job_store, self._outbox)
+            outcome = cancel_handler.handle(
+                validated, sender_email, self._job_store, self._outbox, in_reply_to, references
+            )
         elif validated.operation == Operation.ASSESS_QUERY:
             outcome = assess_query_handler.accept(
-                validated, sender_email, sender_user_id, msg.message_id, self._job_store, self._outbox
+                validated, sender_email, sender_user_id, msg.message_id, self._job_store,
+                self._outbox, in_reply_to, references,
             )
         elif validated.operation == Operation.HELP:
-            outcome = help_handler.handle(sender_email, self._outbox)
+            outcome = help_handler.handle(sender_email, self._outbox, in_reply_to, references)
         else:
             raise Rejected(f"Unsupported operation: {validated.operation!r}")  # unreachable
         return outcome.job_id
+
+    def _continue_clarification(self, msg: EmailMessage, sender_email: str, job_id: str) -> bool:
+        pending = self._pending_clarifications.get(job_id)
+        if pending is None:
+            return False
+
+        answer = _first_unquoted_line(msg.body_text)
+        matches = [option for option in pending.options if _normalise(option) == _normalise(answer)]
+        if len(matches) != 1:
+            subject, body = render_clarification(pending.question, job_id)
+            self._outbox.enqueue(
+                to_email=sender_email,
+                subject=subject,
+                body_text=body,
+                job_id=job_id,
+                in_reply_to=msg.message_id,
+                references=_reply_references(msg),
+            )
+            self._processed.finalize(msg.message_id, outcome="clarification_sent", operation="clarification")
+            self._mail.mark_processed(msg.provider_ref)
+            return True
+
+        job = self._job_store.get_owned(job_id, sender_email)
+        if job is None or job.status.value != "NEEDS_CLARIFICATION":
+            return False
+
+        selected = matches[0]
+        self._job_store.update(job_id, group_hint=selected, in_reply_to_message_id=msg.message_id)
+        self._job_store.set_status(job_id, JobState.QUEUED)
+        self._pending_clarifications.delete(job_id)
+        subject, body = render_clarification_received(job_id, selected)
+        self._outbox.enqueue(
+            to_email=sender_email,
+            subject=subject,
+            body_text=body,
+            job_id=job_id,
+            in_reply_to=msg.message_id,
+            references=_reply_references(msg),
+        )
+        self._processed.finalize(msg.message_id, outcome="clarification_applied", job_id=job_id, operation="clarification")
+        self._mail.mark_processed(msg.provider_ref)
+        return True
+
+    def _match_report(self, msg: EmailMessage, sender_email: str):
+        for message_id in (msg.in_reply_to or "", msg.references or "").split():
+            report = self._report_store.get_by_message_id(message_id, sender_email)
+            if report is not None:
+                return report
+        for report_id in WEEKLY_REPORT_ID_RE.findall(
+            f"{msg.subject or ''} {msg.body_text or ''}"
+        ):
+            report = self._report_store.get(report_id)
+            if report and report.owner_email.casefold() == sender_email.casefold():
+                return report
+        return None
 
     def _reply_and_finalize(
         self, msg: EmailMessage, subject: str, body: str, outcome: str, operation: Optional[str] = None
@@ -238,6 +338,7 @@ class EmailProcessingPipeline:
             subject=subject,
             body_text=body,
             in_reply_to=msg.message_id,
+            references=_reply_references(msg),
         )
         self._processed.finalize(msg.message_id, outcome=outcome, operation=operation)
         self._mail.mark_processed(msg.provider_ref)
@@ -261,7 +362,7 @@ class EmailProcessingPipeline:
                     in_reply_to=message.in_reply_to_message_id,
                     references=message.references_header,
                 )
-                self._outbox.mark_sent(message.id)
+                self._outbox.mark_sent(message.id, provider_message_id)
                 if message.job_id:
                     self._job_store.update(message.job_id, last_response_message_id=provider_message_id)
                 sent += 1
@@ -269,3 +370,20 @@ class EmailProcessingPipeline:
                 logger.exception("Failed to send outbox message %s", message.id)
                 self._outbox.mark_failed(message.id, str(e))
         return sent
+
+
+def _reply_references(msg: EmailMessage) -> str:
+    values = [msg.references, msg.in_reply_to, msg.message_id]
+    return " ".join(dict.fromkeys(value for value in values if value))
+
+
+def _normalise(value: str) -> str:
+    return " ".join((value or "").strip().casefold().split())
+
+
+def _first_unquoted_line(body: str) -> str:
+    for line in (body or "").splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith(">"):
+            return stripped
+    return ""

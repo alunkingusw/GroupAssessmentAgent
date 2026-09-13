@@ -13,7 +13,7 @@ synthesised into a cited answer via Ollama) and GitHub-RAGinator's `/query` for 
 Per-group repo/board configuration lives on meeting_diarisation's `Group` row, not in this
 project's `config.yaml`.
 
-## 2. Scheduled weekly per-group update
+## 2. ~~Scheduled weekly per-group update~~ — first vertical slice done
 
 A proactive report, generated automatically overnight once a week per group, rather than
 triggered by an inbound email. Requires:
@@ -32,6 +32,7 @@ triggered by an inbound email. Requires:
 - **Idempotency/retry**: what happens if the process restarts mid-run — needs the same
   crash-safe, resumable design as the existing job store/outbox, not a fire-and-forget loop.
 
-This depends on item 1 existing first (there's nothing to compile weekly until the sources are
-real), but the scheduling/delivery mechanics are independent and could be prototyped earlier
-against stubbed data if useful.
+Implemented in `app/reports/` and exposed as `weekly-project-update`. The workflow uses LangGraph,
+SQLite report/evidence snapshots, the existing outbox/message-link model, and deterministic
+source adapters. Remaining work is to replace the current bounded GitHub-RAGinator queries with
+structured date-bounded GitHub and Trello activity endpoints when those APIs are available.

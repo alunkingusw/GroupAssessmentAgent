@@ -27,7 +27,7 @@ from app.email_templates.render import (
 from app.github_raginator.client import GithubRaginatorApiError, GithubRaginatorClient
 from app.handlers.base import HandlerOutcome
 from app.jobs.models import Job, JobState
-from app.jobs.store import JobStore, Outbox
+from app.jobs.store import JobStore, Outbox, PendingClarificationStore
 from app.llm.ollama_client import OllamaClient
 from app.llm.transcript_synthesis import synthesize_transcript_answer
 
@@ -41,6 +41,8 @@ def accept(
     source_message_id: str,
     job_store: JobStore,
     outbox: Outbox,
+    in_reply_to: Optional[str] = None,
+    references: Optional[str] = None,
 ) -> HandlerOutcome:
     job = job_store.create_job(
         sender_email,
@@ -56,7 +58,10 @@ def accept(
     job_store.set_status(job.job_id, JobState.QUEUED)
 
     subject, body = render_assess_ack(job.job_id)
-    outbox.enqueue(to_email=sender_email, subject=subject, body_text=body, job_id=job.job_id)
+    outbox.enqueue(
+        to_email=sender_email, subject=subject, body_text=body, job_id=job.job_id,
+        in_reply_to=in_reply_to, references=references,
+    )
     return HandlerOutcome("job_created", job.job_id)
 
 
@@ -68,7 +73,11 @@ def execute(
     job_store: JobStore,
     outbox: Outbox,
     admin_notifier: AdminNotifier,
+    pending_clarifications: Optional[PendingClarificationStore] = None,
 ) -> None:
+    pending_clarifications = pending_clarifications or PendingClarificationStore(job_store._db_path)
+    parent_message_id = job.in_reply_to_message_id or job.source_message_id
+    parent_references = parent_message_id
     job_store.set_status(job.job_id, JobState.PROCESSING)
 
     try:
@@ -79,8 +88,12 @@ def execute(
         if not isinstance(match, Matched):
             question = group_clarification_question(match, groups, "this question")
             job_store.set_status(job.job_id, JobState.NEEDS_CLARIFICATION)
-            subject, body = render_clarification(question)
-            outbox.enqueue(to_email=job.sender_email, subject=subject, body_text=body, job_id=job.job_id)
+            pending_clarifications.put(job.job_id, question, "group_hint", [g.name for g in groups])
+            subject, body = render_clarification(question, job.job_id)
+            outbox.enqueue(
+                to_email=job.sender_email, subject=subject, body_text=body, job_id=job.job_id,
+                in_reply_to=parent_message_id, references=parent_references,
+            )
             return
 
         group = match.group
@@ -126,7 +139,10 @@ def execute(
             trello_checked=bool(job.trello_focus and github_trello_answer),
             unavailable_notes=unavailable_notes,
         )
-        outbox.enqueue(to_email=job.sender_email, subject=subject, body_text=body, job_id=job.job_id)
+        outbox.enqueue(
+            to_email=job.sender_email, subject=subject, body_text=body, job_id=job.job_id,
+            in_reply_to=parent_message_id, references=parent_references,
+        )
 
     except DiarisationApiError as e:
         _handle_failure(job, f"Could not reach the backend to resolve your group: {e}", job_store, outbox, admin_notifier)
@@ -138,9 +154,14 @@ def execute(
 def _handle_failure(
     job: Job, reason: str, job_store: JobStore, outbox: Outbox, admin_notifier: AdminNotifier
 ) -> None:
+    parent_message_id = job.in_reply_to_message_id or job.source_message_id
+    parent_references = parent_message_id
     job_store.set_status(job.job_id, JobState.FAILED, error=reason)
     subject, body = render_failure(reason, job_id=job.job_id)
-    outbox.enqueue(to_email=job.sender_email, subject=subject, body_text=body, job_id=job.job_id)
+    outbox.enqueue(
+        to_email=job.sender_email, subject=subject, body_text=body, job_id=job.job_id,
+        in_reply_to=parent_message_id, references=parent_references,
+    )
     admin_notifier.alert(
         AdminCategory.ASSESS_QUERY_FAILURE,
         f"Job {job.job_id} failed while answering an assess_query.",

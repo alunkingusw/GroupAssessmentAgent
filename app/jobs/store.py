@@ -174,6 +174,21 @@ class JobStore:
         finally:
             conn.close()
 
+    def get_by_response_message_id(self, message_id: str, sender_email: str) -> Optional[Job]:
+        """Find a sender-owned job through any outbound response in its thread."""
+        conn = self._conn()
+        try:
+            row = conn.execute(
+                """SELECT jobs.* FROM jobs
+                   JOIN message_links ON message_links.job_id = jobs.job_id
+                   WHERE message_links.message_id = ? AND LOWER(jobs.sender_email) = LOWER(?)
+                   ORDER BY message_links.created_at DESC LIMIT 1""",
+                (message_id, sender_email),
+            ).fetchone()
+            return Job.from_row(row) if row else None
+        finally:
+            conn.close()
+
     def list_queued(self) -> list[Job]:
         conn = self._conn()
         try:
@@ -357,13 +372,23 @@ class Outbox:
         finally:
             conn.close()
 
-    def mark_sent(self, outbox_id: int) -> None:
+    def mark_sent(self, outbox_id: int, provider_message_id: Optional[str] = None) -> None:
         conn = self._conn()
         try:
+            row = conn.execute(
+                "SELECT job_id FROM outbox WHERE id = ?", (outbox_id,)
+            ).fetchone()
             conn.execute(
                 "UPDATE outbox SET status = 'SENT', sent_at = ? WHERE id = ?",
                 (utcnow_iso(), outbox_id),
             )
+            if provider_message_id:
+                conn.execute(
+                    """INSERT INTO message_links
+                       (outbox_id, job_id, message_id, created_at)
+                       VALUES (?, ?, ?, ?)""",
+                    (outbox_id, row["job_id"] if row else None, provider_message_id, utcnow_iso()),
+                )
         finally:
             conn.close()
 
@@ -382,5 +407,64 @@ class Outbox:
                 "UPDATE outbox SET status = ?, attempts = ?, last_error = ? WHERE id = ?",
                 (status, attempts, error, outbox_id),
             )
+        finally:
+            conn.close()
+
+
+@dataclass
+class PendingClarification:
+    job_id: str
+    question: str
+    expected_field: str
+    options: list[str] = field(default_factory=list)
+    created_at: str = ""
+
+
+class PendingClarificationStore:
+    def __init__(self, db_path: Path):
+        self._db_path = Path(db_path)
+
+    def _conn(self) -> sqlite3.Connection:
+        return get_connection(self._db_path)
+
+    def put(self, job_id: str, question: str, expected_field: str, options: list[str]) -> None:
+        conn = self._conn()
+        try:
+            conn.execute(
+                """INSERT INTO pending_clarifications
+                   (job_id, question, expected_field, options_json, created_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(job_id) DO UPDATE SET
+                     question = excluded.question,
+                     expected_field = excluded.expected_field,
+                     options_json = excluded.options_json,
+                     created_at = excluded.created_at""",
+                (job_id, question, expected_field, json.dumps(options), utcnow_iso()),
+            )
+        finally:
+            conn.close()
+
+    def get(self, job_id: str) -> Optional[PendingClarification]:
+        conn = self._conn()
+        try:
+            row = conn.execute(
+                "SELECT * FROM pending_clarifications WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return PendingClarification(
+                job_id=row["job_id"],
+                question=row["question"],
+                expected_field=row["expected_field"],
+                options=json.loads(row["options_json"]),
+                created_at=row["created_at"],
+            )
+        finally:
+            conn.close()
+
+    def delete(self, job_id: str) -> None:
+        conn = self._conn()
+        try:
+            conn.execute("DELETE FROM pending_clarifications WHERE job_id = ?", (job_id,))
         finally:
             conn.close()

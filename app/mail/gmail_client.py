@@ -13,6 +13,7 @@ from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.parser import BytesParser
+from email.utils import make_msgid
 from typing import Optional
 
 from app.auth.authorisation import AuthSignals
@@ -82,6 +83,7 @@ class GmailMailClient(MailClient):
         message["From"] = self._username
         message["To"] = to
         message["Subject"] = subject
+        message["Message-ID"] = make_msgid("group-assessment-agent")
         if in_reply_to:
             message["In-Reply-To"] = in_reply_to
         if references:
@@ -98,15 +100,7 @@ class GmailMailClient(MailClient):
         with self._smtp_connection() as smtp_client:
             smtp_client.send_message(message)
 
-        message_id = message["Message-ID"]
-        if not message_id:
-            import time
-
-            message_id = f"<group-assessment-agent-{int(time.time() * 1000)}@gmail.com>"
-            message["Message-ID"] = message_id
-            with self._smtp_connection() as smtp_client:
-                smtp_client.send_message(message)
-        return message_id
+        return message["Message-ID"]
 
     def _to_email_message(self, msg: Message, provider_ref: str) -> EmailMessage:
         return EmailMessage(

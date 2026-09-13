@@ -24,7 +24,7 @@ class JobState(str, Enum):
 ALLOWED_TRANSITIONS: dict[JobState, set[JobState]] = {
     JobState.RECEIVED: {JobState.VALIDATING, JobState.FAILED},
     JobState.VALIDATING: {JobState.QUEUED, JobState.NEEDS_CLARIFICATION, JobState.FAILED},
-    JobState.NEEDS_CLARIFICATION: {JobState.CANCELLED, JobState.FAILED},
+    JobState.NEEDS_CLARIFICATION: {JobState.QUEUED, JobState.CANCELLED, JobState.FAILED},
     JobState.QUEUED: {JobState.PROCESSING, JobState.CANCELLED},
     JobState.PROCESSING: {
         JobState.COMPLETED,

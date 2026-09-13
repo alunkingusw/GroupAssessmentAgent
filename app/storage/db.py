@@ -74,6 +74,58 @@ CREATE TABLE IF NOT EXISTS outbox (
 
 CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox (status);
 
+CREATE TABLE IF NOT EXISTS message_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    outbox_id INTEGER NOT NULL UNIQUE,
+    job_id TEXT,
+    message_id TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_links_job ON message_links (job_id);
+
+CREATE TABLE IF NOT EXISTS pending_clarifications (
+    job_id TEXT PRIMARY KEY,
+    question TEXT NOT NULL,
+    expected_field TEXT NOT NULL,
+    options_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS weekly_reports (
+    report_id TEXT PRIMARY KEY,
+    group_id INTEGER NOT NULL,
+    group_name TEXT NOT NULL,
+    owner_email TEXT NOT NULL,
+    backend_user_id INTEGER NOT NULL,
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    status TEXT NOT NULL,
+    report_text TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_weekly_reports_period_group
+    ON weekly_reports (group_id, period_start, period_end);
+
+CREATE TABLE IF NOT EXISTS report_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    evidence_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    event_date TEXT,
+    content TEXT NOT NULL,
+    citation TEXT NOT NULL,
+    raw_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(report_id, source, evidence_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_report_evidence_report ON report_evidence (report_id);
+
 CREATE TABLE IF NOT EXISTS admin_alerts (
     category TEXT PRIMARY KEY,
     last_sent_at TEXT NOT NULL

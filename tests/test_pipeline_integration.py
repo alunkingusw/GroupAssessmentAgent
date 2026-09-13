@@ -199,6 +199,60 @@ def test_ambiguous_group_produces_clarification_after_worker_run(db_path: Path, 
     assert any("Team A" in m.body_text and "Team B" in m.body_text for m in mail.sent)
 
 
+def test_clarification_reply_requeues_and_completes_same_job(db_path: Path, tmp_path: Path):
+    mail = FakeMailClient()
+    original = make_test_email(
+        "alice@uni.ac.uk", message_id="<original-transcript@mail>",
+        attachments=[_vtt_attachment()], auth_signals=PASS,
+    )
+    mail.add_message(original)
+
+    pipeline, job_store, outbox, admin, storage, stub_llm = _build_pipeline(
+        db_path, tmp_path, mail, SUBMIT_TRANSCRIPT_JSON
+    )
+    pipeline.poll_once()
+    job = job_store.list_queued()[0]
+    pipeline.flush_outbox()
+
+    worker, _ = _worker(
+        job_store, storage, outbox, admin,
+        groups=[GroupSummary(id=1, name="Team A"), GroupSummary(id=2, name="Team B")],
+    )
+    worker.run_once()
+    assert job_store.get(job.job_id).status == JobState.NEEDS_CLARIFICATION
+    pipeline.flush_outbox()
+
+    clarification = mail.sent[-1]
+    assert job.job_id in clarification.subject
+    assert clarification.in_reply_to == original.message_id
+    assert clarification.references == original.message_id
+
+    reply = make_test_email(
+        "alice@uni.ac.uk", message_id="<group-answer@mail>", body_text="Team A",
+        in_reply_to=clarification.id, references=clarification.id, auth_signals=PASS,
+    )
+    mail.add_message(reply)
+    pipeline.poll_once()
+
+    assert job_store.get(job.job_id).status == JobState.QUEUED
+    assert job_store.get(job.job_id).group_hint == "Team A"
+    assert stub_llm.calls == 1
+    pipeline.flush_outbox()
+    assert mail.sent[-1].in_reply_to == reply.message_id
+    assert mail.sent[-1].references == clarification.id + " " + reply.message_id
+
+    worker, fake_client = _worker(
+        job_store, storage, outbox, admin,
+        groups=[GroupSummary(id=1, name="Team A"), GroupSummary(id=2, name="Team B")],
+        member_by_name={"Alice": 101, "Bob": 102},
+    )
+    worker.run_once()
+    assert job_store.get(job.job_id).status == JobState.COMPLETED
+    assert len(job_store.list_queued()) == 0
+    pipeline.flush_outbox()
+    assert any(job.job_id in message.subject and "processed" in message.subject.lower() for message in mail.sent)
+
+
 def test_ollama_unavailable_defers_message_without_marking_it_processed(db_path: Path, tmp_path: Path):
     mail = FakeMailClient()
     msg = make_test_email("alice@uni.ac.uk", attachments=[_vtt_attachment()], auth_signals=PASS)

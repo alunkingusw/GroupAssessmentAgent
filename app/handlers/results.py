@@ -10,7 +10,8 @@ from app.jobs.store import JobStore, Outbox
 
 
 def handle(
-    validated_cmd: ValidatedCommand, sender_email: str, job_store: JobStore, outbox: Outbox
+    validated_cmd: ValidatedCommand, sender_email: str, job_store: JobStore, outbox: Outbox,
+    in_reply_to: str | None = None, references: str | None = None,
 ) -> HandlerOutcome:
     job = job_store.get_owned(validated_cmd.job_id, sender_email)
     if job is None:
@@ -40,5 +41,7 @@ def handle(
         body_text=body,
         job_id=job.job_id,
         attachments=attachments,
+        in_reply_to=in_reply_to,
+        references=references,
     )
     return HandlerOutcome("results_reply", job.job_id)
